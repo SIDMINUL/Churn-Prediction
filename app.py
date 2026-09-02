@@ -1,93 +1,145 @@
-import streamlit as st
-import numpy as np
-import pandas as pd
+from pathlib import Path
 import pickle
-import tensorflow as tf
 import time
 
-# Page Config
-st.set_page_config(page_title="Churn Prediction", page_icon="📞", layout="wide")
+import numpy as np
+import pandas as pd
+import streamlit as st
+import tensorflow as tf
 
-# Load model & tools
-model = tf.keras.models.load_model("model.h5")
-scaler = pickle.load(open("scaler.pkl", "rb"))
-encoders = pickle.load(open("encoder.pkl", "rb"))
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "model.h5"
+SCALER_PATH = BASE_DIR / "scaler.pkl"
+ENCODER_PATH = BASE_DIR / "encoder.pkl"
+DATA_PATH = BASE_DIR / "customer_churn.csv"
 
-# Sidebar UI
-st.sidebar.image("https://cdn-icons-png.flaticon.com/512/942/942799.png", width=80)
-st.sidebar.title("Customer Churn Predictor")
-st.sidebar.markdown("""
-🔍 Predict whether a telecom customer will churn or not using AI.  
-Fill in the details and get instant results!
-""")
+st.set_page_config(page_title="Customer Churn Prediction", page_icon="📞", layout="wide")
+
+@st.cache_resource
+def load_artifacts():
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError("model.h5 is missing from the repository.")
+    if not SCALER_PATH.exists():
+        raise FileNotFoundError("scaler.pkl is missing from the repository.")
+    if not ENCODER_PATH.exists():
+        raise FileNotFoundError("encoder.pkl is missing from the repository.")
+
+    model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+    with SCALER_PATH.open("rb") as file:
+        scaler = pickle.load(file)
+    with ENCODER_PATH.open("rb") as file:
+        encoders = pickle.load(file)
+    return model, scaler, encoders
+
+@st.cache_data
+def load_dataset():
+    if not DATA_PATH.exists():
+        raise FileNotFoundError("customer_churn.csv is missing from the repository.")
+    df = pd.read_csv(DATA_PATH)
+    required = {"customerID", "Churn"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Dataset is missing required columns: {', '.join(sorted(missing))}")
+
+    df = df.copy()
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+    df = df.dropna(subset=["TotalCharges"])
+    df = df.drop(columns=["customerID"])
+    return df
+
+try:
+    model, scaler, encoders = load_artifacts()
+    df = load_dataset()
+except Exception as exc:
+    st.error(f"Unable to start the churn predictor: {exc}")
+    st.info("Make sure model.h5, scaler.pkl, encoder.pkl, and customer_churn.csv are present in the repository.")
+    st.stop()
+
+st.sidebar.title("📞 Customer Churn Predictor")
+st.sidebar.caption("Predict telecom customer churn using a trained neural network.")
 st.sidebar.divider()
-st.sidebar.markdown("Developed with ❤️ using **Streamlit & TensorFlow**")
+st.sidebar.metric("Training records", f"{len(df):,}")
+st.sidebar.metric("Features", f"{len(df.columns) - 1}")
 
-# Title
 st.title("📞 Customer Churn Prediction")
-st.markdown("Enter customer details below to check churn probability")
+st.markdown("Enter customer details below to estimate the probability that the customer will churn.")
 
-# Load dataset
-df = pd.read_csv("customer_churn.csv")
-df = df[df.TotalCharges != ' ']
-df.TotalCharges = pd.to_numeric(df.TotalCharges)
-df.drop("customerID", axis=1, inplace=True)
+with st.expander("About this model"):
+    st.write(
+        "This app uses a trained TensorFlow/Keras artificial neural network (ANN). "
+        "Categorical values are transformed with the saved LabelEncoders and the complete feature vector "
+        "is standardized with the saved StandardScaler before prediction."
+    )
 
-# Form UI
+st.subheader("👤 Customer Details")
+
 with st.form("prediction_form"):
-    cols = st.columns(3)
     input_data = {}
-    i = 0
-    for col in df.columns:
-        if col == "Churn":
-            continue
-        if df[col].dtype == "object":
-            options = list(encoders[col].classes_)
-            input_data[col] = cols[i % 3].selectbox(col, options)
-        else:
-            input_data[col] = cols[i % 3].number_input(col, float(df[col].min()), float(df[col].max()))
-        i += 1
+    input_columns = [col for col in df.columns if col != "Churn"]
+    cols = st.columns(3)
 
-    submit = st.form_submit_button("🔮 Predict Churn")
+    for i, col in enumerate(input_columns):
+        with cols[i % 3]:
+            if col in encoders:
+                options = list(encoders[col].classes_)
+                input_data[col] = st.selectbox(col, options, key=f"input_{col}")
+            else:
+                series = pd.to_numeric(df[col], errors="coerce").dropna()
+                minimum = float(series.min())
+                maximum = float(series.max())
+                default = float(series.median())
+                if minimum == maximum:
+                    input_data[col] = st.number_input(col, value=default, key=f"input_{col}")
+                else:
+                    input_data[col] = st.number_input(
+                        col,
+                        min_value=minimum,
+                        max_value=maximum,
+                        value=default,
+                        key=f"input_{col}",
+                    )
 
-# Prediction
-if submit:
+    submitted = st.form_submit_button("🔮 Predict Churn", type="primary", use_container_width=True)
+
+if submitted:
     with st.spinner("Analyzing customer data..."):
-        time.sleep(1.5)
+        time.sleep(0.5)
+        user_df = pd.DataFrame([input_data], columns=input_columns)
 
-    user_df = pd.DataFrame([input_data])
+        try:
+            for col, encoder in encoders.items():
+                if col != "Churn" and col in user_df.columns:
+                    user_df[col] = encoder.transform(user_df[col].astype(str))
 
-    # encoding
-    for col, encoder in encoders.items():
-        if col != "Churn" and col in user_df:
-            user_df[col] = encoder.transform(user_df[col])
+            user_scaled = scaler.transform(user_df)
+            probability = float(model.predict(user_scaled, verbose=0)[0][0])
+        except ValueError as exc:
+            st.error(f"Invalid input: {exc}")
+            st.stop()
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
+            st.stop()
 
+    churn = probability >= 0.5
 
-    # scaling
-    user_df = scaler.transform(user_df)
-
-    prediction = model.predict(user_df)[0][0]
-    churn = prediction > 0.5
-
-    # Result UI
     st.divider()
-    col1, col2 = st.columns(2)
+    st.subheader("📊 Prediction Result")
+    result_col, score_col = st.columns(2)
 
-    with col1:
-        st.subheader("🧠 Prediction Result")
+    with result_col:
         if churn:
-            st.error("⚠ Customer is likely to CHURN!")
+            st.error("⚠️ Customer is likely to CHURN")
+            st.write("Consider targeted retention offers, proactive support, or a plan review.")
         else:
-            st.success("✅ Customer is likely to STAY!")
+            st.success("✅ Customer is likely to STAY")
+            st.write("The model estimates a lower probability of churn for this customer.")
 
-    with col2:
-        st.subheader("📊 Churn Probability")
-        st.progress(float(prediction))
-        st.write(f"**Score:** `{prediction:.2f}`")
+    with score_col:
+        st.metric("Churn probability", f"{probability:.1%}")
+        st.progress(probability)
 
-    # Extra message
-    if churn:
-        st.warning("Consider giving special offers or better customer support to retain this user!")
-    else:
-        st.balloons()
-        st.info("This customer seems satisfied. Keep up the good service! 🎉")
+    with st.expander("Prediction input"):
+        st.dataframe(user_df, use_container_width=True)
+
+st.divider()
+st.caption("For educational and portfolio demonstration purposes. Model predictions should not be treated as business decisions without validation.")
