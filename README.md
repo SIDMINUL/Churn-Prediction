@@ -21,7 +21,7 @@ The application analyzes telecom customer information and estimates the probabil
 
 ## 🧠 Why the model was improved
 
-The earlier version encoded every categorical column with `LabelEncoder` and then standardized the resulting integer values. That can incorrectly imply an ordered relationship between categories such as contract type or internet service.
+The earlier version encoded categorical columns with `LabelEncoder` and then standardized the resulting integer values. That can incorrectly imply an ordered relationship between categories such as contract type or internet service.
 
 The current version uses a proper preprocessing pipeline:
 
@@ -38,7 +38,7 @@ Logistic Regression
 Churn probability
 ```
 
-The app trains the model from the available customer dataset at startup, so the deployed application does not depend on an incompatible TensorFlow runtime or an outdated saved neural-network artifact.
+The deployed app trains this pipeline from the customer dataset at startup. This makes the application lighter and avoids depending on an incompatible TensorFlow runtime or an outdated saved neural-network artifact.
 
 ## 📊 Dataset
 
