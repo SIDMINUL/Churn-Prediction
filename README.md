@@ -19,9 +19,9 @@ The application analyzes telecom customer information and estimates the probabil
 - 🎯 Stratified train/test evaluation
 - 🖥️ Interactive Streamlit interface
 
-## 🧠 Why the model was improved
+## 🧠 Model improvement
 
-The earlier version encoded categorical columns with `LabelEncoder` and then standardized the resulting integer values. That can incorrectly imply an ordered relationship between categories such as contract type or internet service.
+The previous version used `LabelEncoder` on categorical columns before scaling them. That can incorrectly imply an ordered relationship between categories such as contract type or internet service.
 
 The current version uses a proper preprocessing pipeline:
 
@@ -38,20 +38,11 @@ Logistic Regression
 Churn probability
 ```
 
-The deployed app trains this pipeline from the customer dataset at startup. This makes the application lighter and avoids depending on an incompatible TensorFlow runtime or an outdated saved neural-network artifact.
+The deployed app trains the pipeline from the customer dataset at startup. This removes the TensorFlow dependency and makes deployment lighter and more reliable.
 
 ## 📊 Dataset
 
-The project uses the **Telco Customer Churn** dataset containing telecom customer information such as:
-
-- Demographics
-- Tenure
-- Contract type
-- Internet service
-- Payment method
-- Monthly charges
-- Total charges
-- Churn status
+The project uses the **Telco Customer Churn** dataset containing telecom customer information such as demographics, tenure, contract type, internet service, payment method, monthly charges, total charges, and churn status.
 
 ## 🛠️ Tech Stack
 
