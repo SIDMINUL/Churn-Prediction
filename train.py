@@ -1,50 +1,80 @@
-import pandas as pd
+from pathlib import Path
+
+import joblib
 import numpy as np
-import pickle
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+import pandas as pd
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
 from sklearn.model_selection import train_test_split
-import tensorflow as tf
-from tensorflow import keras
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-# Load data
-df = pd.read_csv("customer_churn.csv")
-df.drop('customerID',axis='columns',inplace=True)
-df = df[df.TotalCharges!=' ']
-df.TotalCharges = pd.to_numeric(df.TotalCharges)
+BASE_DIR = Path(__file__).resolve().parent
+DATA_PATH = BASE_DIR / "customer_churn.csv"
+MODEL_PATH = BASE_DIR / "model.joblib"
 
-# Encode categorical columns
-encoders = {}
-for col in df.select_dtypes(include='object'):
-    le = LabelEncoder()
-    df[col] = le.fit_transform(df[col])
-    encoders[col] = le
 
-# Save encoders
-pickle.dump(encoders, open("encoder.pkl","wb"))
+df = pd.read_csv(DATA_PATH)
+df = df.drop(columns=["customerID"])
+df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+df["Churn"] = df["Churn"].map({"No": 0, "Yes": 1})
+df = df.dropna(subset=["Churn"])
 
-# Split data
-X = df.drop("Churn", axis=1)
-y = df["Churn"]
+X = df.drop(columns=["Churn"])
+y = df["Churn"].astype(int)
 
-scaler = StandardScaler()
-X = scaler.fit_transform(X)
-pickle.dump(scaler, open("scaler.pkl","wb"))
+numeric_features = X.select_dtypes(include=np.number).columns.tolist()
+categorical_features = [col for col in X.columns if col not in numeric_features]
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=5)
+preprocessor = ColumnTransformer(
+    [
+        (
+            "numeric",
+            Pipeline(
+                [
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("scaler", StandardScaler()),
+                ]
+            ),
+            numeric_features,
+        ),
+        (
+            "categorical",
+            Pipeline(
+                [
+                    ("imputer", SimpleImputer(strategy="most_frequent")),
+                    (
+                        "onehot",
+                        OneHotEncoder(handle_unknown="ignore", sparse_output=False),
+                    ),
+                ]
+            ),
+            categorical_features,
+        ),
+    ]
+)
 
-# Build ANN model
-model = keras.Sequential([
-    keras.layers.Dense(20, input_shape=(X_train.shape[1],), activation='relu'),
-    keras.layers.Dense(15, activation='relu'),
-    keras.layers.Dense(1, activation='sigmoid')
-])
+model = Pipeline(
+    [
+        ("preprocessor", preprocessor),
+        ("classifier", LogisticRegression(max_iter=2000, solver="liblinear")),
+    ]
+)
 
-model.compile(optimizer='adam',
-              loss='binary_crossentropy',
-              metrics=['accuracy'])
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
 
-model.fit(X_train, y_train, epochs=50)
+model.fit(X_train, y_train)
+probabilities = model.predict_proba(X_test)[:, 1]
+predictions = (probabilities >= 0.5).astype(int)
 
-# Save model
-model.save("model.h5")
-print("✅ Model, scaler, and encoders saved successfully!")
+print(f"Accuracy: {accuracy_score(y_test, predictions):.4f}")
+print(f"ROC-AUC:  {roc_auc_score(y_test, probabilities):.4f}")
+print("\nClassification report:")
+print(classification_report(y_test, predictions, target_names=["Stay", "Churn"]))
+
+joblib.dump(model, MODEL_PATH)
+print(f"\nSaved model to: {MODEL_PATH}")
