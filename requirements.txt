@@ -1,5 +1,6 @@
+# Streamlit Community Cloud-compatible dependency set
 streamlit>=1.36,<2
-numpy>=1.26,<3
+numpy==1.26.4
 pandas>=2.2,<3
 scikit-learn>=1.5,<2
-tensorflow-cpu>=2.16,<2.19
+tensorflow-cpu==2.16.2
